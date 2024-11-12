@@ -2,15 +2,19 @@ package source
 
 import (
 	"bytes"
+	"crypto/rand"
+	"crypto/tls"
 	"errors"
 	"fmt"
+	_ "image/gif"
+	"io"
+	"net/http"
+	"time"
+
 	"github.com/metafates/mangal/constant"
 	"github.com/metafates/mangal/log"
 	"github.com/metafates/mangal/network"
 	"github.com/metafates/mangal/util"
-	_ "image/gif"
-	"io"
-	"net/http"
 )
 
 // Page represents a page in a chapter
@@ -55,7 +59,52 @@ func (p *Page) Download() error {
 		return err
 	}
 
-	resp, err := network.Client.Do(req)
+	var resp *http.Response
+	if p.Chapter.Manga.Source.Name() == "KLManga" {
+		client := http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   100,
+				MaxConnsPerHost:       200,
+				IdleConnTimeout:       30 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				ExpectContinueTimeout: 30 * time.Second,
+			},
+		}
+		resp, err = client.Do(req)
+	} else if p.Chapter.Manga.Source.Name() == "MangaHub" {
+		client := http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{
+					MaxVersion: tls.VersionTLS12,
+				},
+				MaxIdleConns:          100,
+				MaxIdleConnsPerHost:   100,
+				MaxConnsPerHost:       200,
+				IdleConnTimeout:       30 * time.Second,
+				ResponseHeaderTimeout: 30 * time.Second,
+				ExpectContinueTimeout: 30 * time.Second,
+			},
+		}
+
+		header := http.Header{}
+		header.Set("Content-Type", "application/json")
+		header.Set("Accept", "application/json")
+		header.Set("Origin", "https://mangahub.io")
+		header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:30.0) Gecko/20100101 Firefox/30.0")
+
+		uuid, err := generateUUID()
+		if err != nil {
+			return err
+		}
+		header.Set("x-mhub-access", uuid)
+		resp, err = client.Do(req)
+	} else {
+		resp, err = network.Client.Do(req)
+	}
 	if err != nil {
 		log.Error(err)
 		return err
@@ -128,4 +177,19 @@ func (p *Page) Filename() (filename string) {
 
 func (p *Page) Source() Source {
 	return p.Chapter.Source()
+}
+
+func generateUUID() (string, error) {
+	var uuid [16]byte
+	_, err := rand.Read(uuid[:])
+	if err != nil {
+		return "", err
+	}
+
+	// Set version (4 bits) and variant (2 bits) according to the UUID v4 specification
+	uuid[6] = (uuid[6] & 0x0F) | 0x40 // version 4
+	uuid[8] = (uuid[8] & 0x3F) | 0x80 // variant 1
+
+	// Format the UUID as a string
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%12x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]), nil
 }
