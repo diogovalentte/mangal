@@ -6,9 +6,15 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"image"
+	"image/draw"
 	_ "image/gif"
+	"image/jpeg"
+	"image/png"
 	"io"
 	"net/http"
+	"regexp"
+	"strconv"
 	"time"
 
 	"github.com/metafates/mangal/constant"
@@ -96,7 +102,8 @@ func (p *Page) Download() error {
 		header.Set("Origin", "https://mangahub.io")
 		header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64; rv:30.0) Gecko/20100101 Firefox/30.0")
 
-		uuid, err := generateUUID()
+		var uuid string
+		uuid, err = generateUUID()
 		if err != nil {
 			return err
 		}
@@ -179,6 +186,78 @@ func (p *Page) Source() Source {
 	return p.Chapter.Source()
 }
 
+func (p *Page) SplitMergedPage() ([]*Page, error) {
+	pagesCount, err := pagesFromURL(p.URL)
+	if err != nil {
+		return nil, err
+	}
+
+	if pagesCount <= 1 || p.Contents == nil {
+		return []*Page{p}, nil
+	}
+
+	// Decode image
+	img, format, err := image.Decode(bytes.NewReader(p.Contents.Bytes()))
+	if err != nil {
+		return nil, err
+	}
+
+	b := img.Bounds()
+	width := b.Dx()
+	height := b.Dy()
+
+	sliceHeight := height / pagesCount
+	if sliceHeight == 0 {
+		return []*Page{p}, nil
+	}
+
+	var pages []*Page
+	y := 0
+	index := p.Index
+
+	for i := 0; i < pagesCount; i++ {
+		h := sliceHeight
+		if i == pagesCount-1 {
+			h = height - y // remainder
+		}
+
+		sub := image.NewRGBA(image.Rect(0, 0, width, h))
+		draw.Draw(
+			sub,
+			sub.Bounds(),
+			img,
+			image.Point{X: 0, Y: y},
+			draw.Src,
+		)
+
+		var buf bytes.Buffer
+		switch format {
+		case "png":
+			err = png.Encode(&buf, sub)
+		default:
+			err = jpeg.Encode(&buf, sub, &jpeg.Options{Quality: 95})
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		newPage := &Page{
+			Index:    index,
+			URL:      p.URL,
+			Chapter:  p.Chapter,
+			Contents: &buf,
+			Size:     uint64(buf.Len()),
+		}
+
+		pages = append(pages, newPage)
+
+		y += h
+		index++
+	}
+
+	return pages, nil
+}
+
 func generateUUID() (string, error) {
 	var uuid [16]byte
 	_, err := rand.Read(uuid[:])
@@ -192,4 +271,16 @@ func generateUUID() (string, error) {
 
 	// Format the UUID as a string
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%12x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]), nil
+}
+
+func pagesFromURL(u string) (int, error) {
+	// matches: merged_1-18.jpg / merged_1-18.jpeg / merged_1-18.png
+	re := regexp.MustCompile(`merged_\d+-(\d+)\.`)
+
+	m := re.FindStringSubmatch(u)
+	if len(m) != 2 {
+		return 0, fmt.Errorf("page count not found in url")
+	}
+
+	return strconv.Atoi(m[1])
 }

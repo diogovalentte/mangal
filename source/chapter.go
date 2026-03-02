@@ -2,19 +2,21 @@ package source
 
 import (
 	"fmt"
-	"github.com/dustin/go-humanize"
-	"github.com/metafates/mangal/constant"
-	"github.com/metafates/mangal/filesystem"
-	"github.com/metafates/mangal/key"
-	"github.com/metafates/mangal/style"
-	"github.com/metafates/mangal/util"
-	"github.com/samber/mo"
-	"github.com/spf13/viper"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/dustin/go-humanize"
+	"github.com/samber/mo"
+	"github.com/spf13/viper"
+
+	"github.com/metafates/mangal/constant"
+	"github.com/metafates/mangal/filesystem"
+	"github.com/metafates/mangal/key"
+	"github.com/metafates/mangal/style"
+	"github.com/metafates/mangal/util"
 )
 
 // Chapter is a struct that represents a chapter of a manga.
@@ -88,6 +90,24 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 	if err != nil {
 		c.isDownloaded = mo.Some(false)
 		return err
+	}
+
+	if c.Manga.Source.Name() == "KLManga" && len(c.Pages) == 1 {
+		page := c.Pages[0]
+
+		splitPages, err := page.SplitMergedPage()
+		if err != nil {
+			return err
+		}
+
+		if len(splitPages) > 1 {
+			c.Pages = splitPages
+
+			c.size = 0
+			for _, p := range c.Pages {
+				c.size += p.Size
+			}
+		}
 	}
 
 	c.isDownloaded = mo.Some(!temp)
@@ -174,9 +194,7 @@ func (c *Chapter) Source() Source {
 }
 
 func (c *Chapter) ComicInfo() *ComicInfo {
-	var (
-		day, month, year int
-	)
+	var day, month, year int
 
 	if viper.GetBool(key.MetadataComicInfoXMLAddDate) {
 		if viper.GetBool(key.MetadataComicInfoXMLAlternativeDate) {
