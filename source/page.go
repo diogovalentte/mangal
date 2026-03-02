@@ -13,6 +13,7 @@ import (
 	"image/png"
 	"io"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
@@ -242,11 +243,12 @@ func (p *Page) SplitMergedPage() ([]*Page, error) {
 		}
 
 		newPage := &Page{
-			Index:    index,
-			URL:      p.URL,
-			Chapter:  p.Chapter,
-			Contents: &buf,
-			Size:     uint64(buf.Len()),
+			Index:     index,
+			URL:       p.URL,
+			Chapter:   p.Chapter,
+			Contents:  &buf,
+			Size:      uint64(buf.Len()),
+			Extension: filepath.Ext(p.URL),
 		}
 
 		pages = append(pages, newPage)
