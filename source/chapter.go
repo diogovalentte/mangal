@@ -92,7 +92,7 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 		return err
 	}
 
-	if c.Manga.Source.Name() == "KLManga" && len(c.Pages) == 1 {
+	if c.Manga.Source.Name() == "KLManga" && len(c.Pages) > 0 && strings.Contains(c.Pages[0].URL, "merged") {
 		page := c.Pages[0]
 
 		splitPages, err := page.SplitMergedPage()
