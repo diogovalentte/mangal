@@ -13,7 +13,6 @@ import (
 	"image/png"
 	"io"
 	"net/http"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"time"
@@ -154,6 +153,10 @@ func (p *Page) Download() error {
 	p.Contents = bytes.NewBuffer(buf)
 	p.Size = uint64(util.Max(contentLength, 0))
 
+	if p.Extension == "" {
+		p.Extension = extensionFromContents(buf)
+	}
+
 	log.Tracef("Page #%d downloaded", p.Index)
 	return nil
 }
@@ -248,7 +251,7 @@ func (p *Page) SplitMergedPage() ([]*Page, error) {
 			Chapter:   p.Chapter,
 			Contents:  &buf,
 			Size:      uint64(buf.Len()),
-			Extension: filepath.Ext(p.URL),
+			Extension: p.Extension,
 		}
 
 		pages = append(pages, newPage)
@@ -273,6 +276,23 @@ func generateUUID() (string, error) {
 
 	// Format the UUID as a string
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%12x", uuid[0:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]), nil
+}
+
+func extensionFromContents(contents []byte) string {
+	switch http.DetectContentType(contents) {
+	case "image/jpeg":
+		return ".jpg"
+	case "image/png":
+		return ".png"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	case "image/bmp":
+		return ".bmp"
+	default:
+		return ""
+	}
 }
 
 func pagesFromURL(u string) (int, error) {
