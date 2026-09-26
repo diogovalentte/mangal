@@ -20,6 +20,7 @@ import (
 	"github.com/metafates/mangal/constant"
 	"github.com/metafates/mangal/log"
 	"github.com/metafates/mangal/network"
+	"github.com/metafates/mangal/splitter"
 	"github.com/metafates/mangal/util"
 )
 
@@ -190,52 +191,75 @@ func (p *Page) Source() Source {
 	return p.Chapter.Source()
 }
 
-func (p *Page) SplitMergedPage() ([]*Page, error) {
-	pagesCount, err := pagesFromURL(p.URL)
-	if err != nil {
-		log.Warnf("Page #%d: %s, keeping it unsplit (%s)", p.Index, err, p.URL)
+// SplitMergedPage splits an image made of several pages stacked vertically.
+// The page count in the URL (merged_1-18.jpg) wins; without it the page
+// height is detected from the image, but only when detect is true.
+func (p *Page) SplitMergedPage(detect bool) ([]*Page, error) {
+	if p.Contents == nil {
 		return []*Page{p}, nil
 	}
 
-	if pagesCount <= 1 || p.Contents == nil {
+	pagesCount, countErr := pagesFromURL(p.URL)
+	if countErr == nil && pagesCount <= 1 {
+		return []*Page{p}, nil
+	}
+	if countErr != nil && !detect {
 		return []*Page{p}, nil
 	}
 
-	// Decode image
 	img, format, err := image.Decode(bytes.NewReader(p.Contents.Bytes()))
 	if err != nil {
 		return nil, err
 	}
 
-	b := img.Bounds()
-	width := b.Dx()
-	height := b.Dy()
-
-	sliceHeight := height / pagesCount
-	if sliceHeight == 0 {
-		return []*Page{p}, nil
+	height := img.Bounds().Dy()
+	var cuts []int
+	if countErr == nil {
+		sliceHeight := height / pagesCount
+		if sliceHeight == 0 {
+			return []*Page{p}, nil
+		}
+		for i := 0; i < pagesCount; i++ {
+			cuts = append(cuts, i*sliceHeight)
+		}
+		cuts = append(cuts, height)
+	} else {
+		r := splitter.Detect(img)
+		if !r.Reliable {
+			log.Warnf("Page #%d: no page height fits the image, keeping it unsplit (%s)", p.Index, p.URL)
+			return []*Page{p}, nil
+		}
+		log.Infof("Page #%d: detected page height %dpx, splitting into %d pages", p.Index, r.PageHeight, len(r.Cuts)-1)
+		cuts = r.Cuts
 	}
 
+	return p.splitAt(img, format, cuts)
+}
+
+// splitAt cuts img at the given rows, from 0 to its height, one page per piece.
+func (p *Page) splitAt(img image.Image, format string, cuts []int) ([]*Page, error) {
+	b := img.Bounds()
+	width := b.Dx()
+
 	var pages []*Page
-	y := 0
 	index := p.Index
 
-	for i := 0; i < pagesCount; i++ {
-		h := sliceHeight
-		if i == pagesCount-1 {
-			h = height - y // remainder
-		}
+	for i := 0; i+1 < len(cuts); i++ {
+		y, h := cuts[i], cuts[i+1]-cuts[i]
 
 		sub := image.NewRGBA(image.Rect(0, 0, width, h))
 		draw.Draw(
 			sub,
 			sub.Bounds(),
 			img,
-			image.Point{X: 0, Y: y},
+			image.Point{X: b.Min.X, Y: b.Min.Y + y},
 			draw.Src,
 		)
 
-		var buf bytes.Buffer
+		var (
+			buf bytes.Buffer
+			err error
+		)
 		switch format {
 		case "png":
 			err = png.Encode(&buf, sub)
@@ -256,8 +280,6 @@ func (p *Page) SplitMergedPage() ([]*Page, error) {
 		}
 
 		pages = append(pages, newPage)
-
-		y += h
 		index++
 	}
 

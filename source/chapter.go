@@ -93,14 +93,17 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 	}
 
 	if c.Manga.Source.Name() == "KLManga" {
+		// a single image is the whole chapter merged; when the source lists
+		// the pages, only URLs carrying a page count are split
+		detect := len(c.Pages) == 1
 		var pages []*Page
 		for _, page := range c.Pages {
-			if !strings.Contains(page.URL, "merged") {
+			if !detect && !strings.Contains(page.URL, "merged") {
 				pages = append(pages, page)
 				continue
 			}
 
-			splitPages, err := page.SplitMergedPage()
+			splitPages, err := page.SplitMergedPage(detect)
 			if err != nil {
 				return err
 			}
