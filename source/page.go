@@ -193,7 +193,8 @@ func (p *Page) Source() Source {
 func (p *Page) SplitMergedPage() ([]*Page, error) {
 	pagesCount, err := pagesFromURL(p.URL)
 	if err != nil {
-		return nil, err
+		log.Warnf("Page #%d: %s, keeping it unsplit (%s)", p.Index, err, p.URL)
+		return []*Page{p}, nil
 	}
 
 	if pagesCount <= 1 || p.Contents == nil {
