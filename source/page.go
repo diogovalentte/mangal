@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/metafates/mangal/constant"
@@ -148,6 +149,12 @@ func (p *Page) Download() error {
 	}
 
 	if err != nil {
+		return err
+	}
+
+	if err = notAnImage(buf); err != nil {
+		err = fmt.Errorf("page #%d (%s): %w", p.Index, p.URL, err)
+		log.Error(err)
 		return err
 	}
 
@@ -316,6 +323,18 @@ func extensionFromContents(contents []byte) string {
 	default:
 		return ""
 	}
+}
+
+// notAnImage rejects contents that are text, like an error message or an HTML
+// page served with status 200. Unknown binary formats are let through.
+func notAnImage(contents []byte) error {
+	contentType := http.DetectContentType(contents)
+	if !strings.HasPrefix(contentType, "text/") {
+		return nil
+	}
+
+	snippet := strings.TrimSpace(string(contents[:util.Min(len(contents), 64)]))
+	return fmt.Errorf("not an image, got %s: %q", contentType, snippet)
 }
 
 func pagesFromURL(u string) (int, error) {

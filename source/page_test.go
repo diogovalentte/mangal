@@ -104,3 +104,23 @@ func TestPage_SplitMergedPageReal(t *testing.T) {
 		t.Fatalf("got %d pages, want %s", len(pages), want)
 	}
 }
+
+func TestNotAnImage(t *testing.T) {
+	tests := []struct {
+		name     string
+		contents []byte
+		wantErr  bool
+	}{
+		{"expired message", []byte("Expired"), true},
+		{"html page", []byte("<!DOCTYPE html><html><body>404</body></html>"), true},
+		{"jpeg", mergedStrip(t, 1, 100, 100).Bytes(), false},
+		{"unknown binary", []byte{0x00, 0x01, 0x02, 0xff, 0xfe}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := notAnImage(tt.contents); (err != nil) != tt.wantErr {
+				t.Fatalf("notAnImage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
