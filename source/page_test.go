@@ -6,10 +6,13 @@ import (
 	"image/color"
 	"image/jpeg"
 	"math/rand"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
+	"time"
 )
 
 // mergedStrip encodes a JPEG of n synthetic pages stacked vertically.
@@ -120,6 +123,51 @@ func TestNotAnImage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := notAnImage(tt.contents); (err != nil) != tt.wantErr {
 				t.Fatalf("notAnImage() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestPage_DownloadRetriesTransientErrors(t *testing.T) {
+	defer func(d []time.Duration) { pageRetryDelays = d }(pageRetryDelays)
+	pageRetryDelays = []time.Duration{0, 0, 0}
+
+	img := mergedStrip(t, 1, 100, 100).Bytes()
+	tests := []struct {
+		name      string
+		failures  int
+		failure   func(w http.ResponseWriter)
+		wantErr   bool
+		wantCalls int
+	}{
+		{"expired then image", 2, func(w http.ResponseWriter) { _, _ = w.Write([]byte("Expired")) }, false, 3},
+		{"expired every time", 10, func(w http.ResponseWriter) { _, _ = w.Write([]byte("Expired")) }, true, 4},
+		{"server error then image", 1, func(w http.ResponseWriter) { w.WriteHeader(http.StatusBadGateway) }, false, 2},
+		{"not found is not retried", 10, func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }, true, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			calls := 0
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				if calls <= tt.failures {
+					tt.failure(w)
+					return
+				}
+				_, _ = w.Write(img)
+			}))
+			defer srv.Close()
+
+			page := &Page{URL: srv.URL, Index: 1, Chapter: &Chapter{Manga: &Manga{Source: &testSource{}}}}
+			err := page.Download()
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Download() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if calls != tt.wantCalls {
+				t.Fatalf("got %d requests, want %d", calls, tt.wantCalls)
+			}
+			if !tt.wantErr && page.Contents.Len() != len(img) {
+				t.Fatalf("got %d bytes, want %d", page.Contents.Len(), len(img))
 			}
 		})
 	}

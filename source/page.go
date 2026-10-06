@@ -12,6 +12,7 @@ import (
 	"image/jpeg"
 	"image/png"
 	"io"
+	mathrand "math/rand"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -53,6 +54,21 @@ func (p *Page) request() (*http.Request, error) {
 	return req, nil
 }
 
+// pageRetryDelays are the waits before each new attempt of a page download
+// that failed with a transientError. Up to half of each wait is added at
+// random, so pages that failed together don't all retry at once.
+var pageRetryDelays = []time.Duration{5 * time.Second, 15 * time.Second, 30 * time.Second}
+
+// transientError is a page download failure that may succeed if tried again,
+// like the KLManga image server answering "Expired" while under load.
+type transientError struct {
+	err error
+}
+
+func (e *transientError) Error() string { return e.err.Error() }
+
+func (e *transientError) Unwrap() error { return e.err }
+
 // Download Page contents.
 func (p *Page) Download() error {
 	if p.URL == "" {
@@ -60,6 +76,24 @@ func (p *Page) Download() error {
 		return nil
 	}
 
+	for attempt := 0; ; attempt++ {
+		err := p.download()
+
+		var transient *transientError
+		if err == nil || !errors.As(err, &transient) || attempt == len(pageRetryDelays) {
+			return err
+		}
+
+		delay := pageRetryDelays[attempt]
+		if delay > 0 {
+			delay += time.Duration(mathrand.Int63n(int64(delay)/2 + 1))
+		}
+		log.Warnf("Page #%d: %s, trying again in %s", p.Index, err, delay)
+		time.Sleep(delay)
+	}
+}
+
+func (p *Page) download() error {
 	log.Tracef("Downloading page #%d (%s)", p.Index, p.URL)
 
 	req, err := p.request()
@@ -124,6 +158,9 @@ func (p *Page) Download() error {
 	if resp.StatusCode != http.StatusOK {
 		err = errors.New("http error: " + resp.Status)
 		log.Error(err)
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= http.StatusInternalServerError {
+			return &transientError{err}
+		}
 		return err
 	}
 
@@ -155,7 +192,7 @@ func (p *Page) Download() error {
 	if err = notAnImage(buf); err != nil {
 		err = fmt.Errorf("page #%d (%s): %w", p.Index, p.URL, err)
 		log.Error(err)
-		return err
+		return &transientError{err}
 	}
 
 	p.Contents = bytes.NewBuffer(buf)
