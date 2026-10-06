@@ -13,6 +13,10 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
+
+	"github.com/metafates/mangal/key"
 )
 
 // mergedStrip encodes a JPEG of n synthetic pages stacked vertically.
@@ -170,5 +174,31 @@ func TestPage_DownloadRetriesTransientErrors(t *testing.T) {
 				t.Fatalf("got %d bytes, want %d", page.Contents.Len(), len(img))
 			}
 		})
+	}
+}
+
+func TestChapter_DownloadPagesKeepsFirstError(t *testing.T) {
+	defer func(async bool) { viper.Set(key.DownloaderAsync, async) }(viper.GetBool(key.DownloaderAsync))
+	viper.Set(key.DownloaderAsync, true)
+
+	img := mergedStrip(t, 1, 100, 100).Bytes()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/missing" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// pages that succeed finish after the one that fails
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write(img)
+	}))
+	defer srv.Close()
+
+	chapter := &Chapter{Manga: &Manga{Source: &testSource{}}}
+	for i, path := range []string{"/missing", "/a", "/b", "/c"} {
+		chapter.Pages = append(chapter.Pages, &Page{URL: srv.URL + path, Index: uint16(i + 1), Chapter: chapter})
+	}
+
+	if err := chapter.DownloadPages(true, func(string) {}); err == nil {
+		t.Fatal("DownloadPages() error = nil, want the error of the missing page")
 	}
 }

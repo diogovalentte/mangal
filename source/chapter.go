@@ -60,6 +60,9 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 	wg := sync.WaitGroup{}
 	wg.Add(len(c.Pages))
 
+	// guards err and c.size, written by the pages downloaded in parallel
+	var mu sync.Mutex
+
 	for _, page := range c.Pages {
 		if page == nil {
 			return fmt.Errorf("page #%d is empty, aborting download", page.Index)
@@ -69,13 +72,24 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 			defer wg.Done()
 
 			// if at any point, an error is encountered, stop downloading other pages
-			if err != nil {
+			mu.Lock()
+			failed := err != nil
+			mu.Unlock()
+			if failed {
 				return
 			}
 
-			err = page.Download()
+			pageErr := page.Download()
+
+			mu.Lock()
+			if err == nil {
+				err = pageErr
+			}
 			c.size += page.Size
-			progress(status())
+			s := status()
+			mu.Unlock()
+
+			progress(s)
 		}
 
 		if viper.GetBool(key.DownloaderAsync) {

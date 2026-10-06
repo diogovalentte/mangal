@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
+	"fmt"
 	"github.com/metafates/mangal/filesystem"
 	"github.com/metafates/mangal/key"
 	"github.com/metafates/mangal/source"
@@ -40,7 +41,26 @@ func save(chapter *source.Chapter, temp bool) (path string, err error) {
 	return path, nil
 }
 
+// SaveTo writes the chapter as a CBZ file at to. The file is written next to
+// it with a .part suffix and renamed when complete, so a file already at to is
+// replaced at once and readers never see it missing or half written.
 func SaveTo(chapter *source.Chapter, to string) error {
+	for _, page := range chapter.Pages {
+		if page.Contents == nil {
+			return fmt.Errorf("page #%d was not downloaded", page.Index)
+		}
+	}
+
+	part := to + ".part"
+	if err := writeCBZ(chapter, part); err != nil {
+		_ = filesystem.Api().Remove(part)
+		return err
+	}
+
+	return filesystem.Api().Rename(part, to)
+}
+
+func writeCBZ(chapter *source.Chapter, to string) error {
 	cbzFile, err := filesystem.Api().Create(to)
 	if err != nil {
 		return err
@@ -51,6 +71,18 @@ func SaveTo(chapter *source.Chapter, to string) error {
 	zipWriter := zip.NewWriter(cbzFile)
 	defer util.Ignore(zipWriter.Close)
 
+	if err = addPages(zipWriter, chapter); err != nil {
+		return err
+	}
+
+	if err = zipWriter.Close(); err != nil {
+		return err
+	}
+
+	return cbzFile.Close()
+}
+
+func addPages(zipWriter *zip.Writer, chapter *source.Chapter) (err error) {
 	for _, page := range chapter.Pages {
 		if err = addToZip(zipWriter, page.Contents, page.Filename()); err != nil {
 			return err

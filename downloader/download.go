@@ -25,13 +25,9 @@ func Download(chapter *source.Chapter, progress func(string)) (string, error) {
 		return "", err
 	}
 
-	if viper.GetBool(key.DownloaderRedownloadExisting) {
-		log.Info("chapter already downloaded, deleting and redownloading")
-		err = filesystem.Api().Remove(path)
-		if err != nil {
-			log.Warn(err)
-		}
-	} else {
+	// when redownloading, the existing chapter is kept until the converter
+	// overwrites it, so a failed download doesn't lose it
+	if !viper.GetBool(key.DownloaderRedownloadExisting) {
 		log.Info("checking if chapter is already downloaded")
 		if chapter.IsDownloaded() {
 			log.Info("chapter already downloaded, skipping")

@@ -120,3 +120,42 @@ func SampleChapter(t *testing.T) *source.Chapter {
 
 	return &chapter
 }
+
+func TestSaveToReplacesOnlyComplete(t *testing.T) {
+	Convey("Given a CBZ file already saved for a chapter", t, func() {
+		path := filepath.Join("replace", "chapter.cbz")
+		// SampleChapter resets the filesystem, so the old file is written after it
+		saveOld := func() {
+			lo.Must0(filesystem.Api().MkdirAll("replace", 0755))
+			lo.Must0(filesystem.Api().WriteFile(path, []byte("old"), 0644))
+		}
+
+		Convey("When a page of the new download is missing", func() {
+			chapter := SampleChapter(t)
+			saveOld()
+			chapter.Pages[0].Contents = nil
+			err := SaveTo(chapter, path)
+
+			Convey("Then it fails and keeps the old file", func() {
+				So(err, ShouldNotBeNil)
+				So(string(lo.Must(filesystem.Api().ReadFile(path))), ShouldEqual, "old")
+				So(lo.Must(filesystem.Api().Exists(path+".part")), ShouldBeFalse)
+			})
+		})
+
+		Convey("When the new download is complete", func() {
+			chapter := SampleChapter(t)
+			saveOld()
+			err := SaveTo(chapter, path)
+
+			Convey("Then the old file is replaced and no .part is left", func() {
+				So(err, ShouldBeNil)
+				file := lo.Must(filesystem.Api().Open(path))
+				info := lo.Must(file.Stat())
+				zipReader := lo.Must(zip.NewReader(file, info.Size()))
+				So(len(zipReader.File), ShouldEqual, len(chapter.Pages)+1)
+				So(lo.Must(filesystem.Api().Exists(path+".part")), ShouldBeFalse)
+			})
+		})
+	})
+}
