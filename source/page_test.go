@@ -62,6 +62,8 @@ func TestPage_SplitMergedPage(t *testing.T) {
 	}{
 		{"page count in url", "https://cdn/merged_1-6.jpg", false, n},
 		{"page count in url wins over detection", "https://cdn/merged_1-3.jpg", true, 3},
+		{"page range in url not starting at 1", "https://cdn/merged_7-12.jpg", false, n},
+		{"page range in url ending before it starts", "https://cdn/merged_12-7.jpg", false, 1},
 		{"no count, detection on", "https://cdn/merged_Chapter%2010.jpg", true, n},
 		{"no count, detection off", "https://cdn/6ylmkqeefkbo", false, 1},
 	}

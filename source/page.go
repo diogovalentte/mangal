@@ -375,13 +375,27 @@ func notAnImage(contents []byte) error {
 }
 
 func pagesFromURL(u string) (int, error) {
-	// matches: merged_1-18.jpg / merged_1-18.jpeg / merged_1-18.png
-	re := regexp.MustCompile(`merged_\d+-(\d+)\.`)
+	// matches: merged_1-18.jpg / merged_35-68.jpeg / merged_1-18.png
+	// the numbers are the first and last page, so later parts of a chapter
+	// (merged_35-68) hold last - first + 1 pages
+	re := regexp.MustCompile(`merged_(\d+)-(\d+)\.`)
 
 	m := re.FindStringSubmatch(u)
-	if len(m) != 2 {
+	if len(m) != 3 {
 		return 0, fmt.Errorf("page count not found in url")
 	}
 
-	return strconv.Atoi(m[1])
+	first, err := strconv.Atoi(m[1])
+	if err != nil {
+		return 0, err
+	}
+	last, err := strconv.Atoi(m[2])
+	if err != nil {
+		return 0, err
+	}
+	if last < first {
+		return 0, fmt.Errorf("page range %d-%d in url ends before it starts", first, last)
+	}
+
+	return last - first + 1, nil
 }
