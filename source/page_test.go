@@ -204,3 +204,38 @@ func TestChapter_DownloadPagesKeepsFirstError(t *testing.T) {
 		t.Fatal("DownloadPages() error = nil, want the error of the missing page")
 	}
 }
+
+type klmangaSource struct{ testSource }
+
+func (klmangaSource) Name() string { return "KLManga" }
+
+func TestChapter_DownloadPagesSplitsStripsWithoutPageCount(t *testing.T) {
+	const w, h = 400, 580
+	images := map[string][]byte{
+		"/strip-a": mergedStrip(t, 6, w, h).Bytes(),
+		"/strip-b": mergedStrip(t, 3, w, h).Bytes(),
+		// two pages stacked are under the strip ratio, so they stay whole
+		"/pair": mergedStrip(t, 2, w, w*3/2).Bytes(),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		_, _ = rw.Write(images[r.URL.Path])
+	}))
+	defer srv.Close()
+
+	chapter := &Chapter{Manga: &Manga{Source: &klmangaSource{}}}
+	for i, path := range []string{"/strip-a", "/strip-b", "/pair"} {
+		chapter.Pages = append(chapter.Pages, &Page{URL: srv.URL + path, Index: uint16(i + 1), Chapter: chapter})
+	}
+
+	if err := chapter.DownloadPages(true, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := len(chapter.Pages), 6+3+1; got != want {
+		t.Fatalf("got %d pages, want %d", got, want)
+	}
+	for i, p := range chapter.Pages {
+		if p.Index != uint16(i+1) {
+			t.Errorf("page %d has index %d", i, p.Index)
+		}
+	}
+}

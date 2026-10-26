@@ -280,6 +280,22 @@ func (p *Page) SplitMergedPage(detect bool) ([]*Page, error) {
 	return p.splitAt(img, format, cuts)
 }
 
+// stripMinRatio is how many times taller than wide an image must be to be
+// taken as several pages stacked, well above a single page (~1.4).
+const stripMinRatio = 3
+
+// isStrip tells whether the page looks like several pages stacked vertically.
+func (p *Page) isStrip() bool {
+	if p.Contents == nil {
+		return false
+	}
+	cfg, _, err := image.DecodeConfig(bytes.NewReader(p.Contents.Bytes()))
+	if err != nil || cfg.Width == 0 {
+		return false
+	}
+	return cfg.Height > stripMinRatio*cfg.Width
+}
+
 // splitAt cuts img at the given rows, from 0 to its height, one page per piece.
 func (p *Page) splitAt(img image.Image, format string, cuts []int) ([]*Page, error) {
 	b := img.Bounds()
