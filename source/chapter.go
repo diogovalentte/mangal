@@ -106,7 +106,7 @@ func (c *Chapter) DownloadPages(temp bool, progress func(string)) (err error) {
 		return err
 	}
 
-	if c.Manga.Source.Name() == "KLManga" {
+	if name := c.Manga.Source.Name(); name == "KLManga" || name == "JManga" {
 		// a single image is the whole chapter merged; when the source lists
 		// the pages, only URLs carrying a page count or images shaped like a
 		// strip are split
